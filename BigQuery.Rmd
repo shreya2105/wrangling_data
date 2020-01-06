@@ -1,0 +1,210 @@
+---
+title: "BigQuery"
+author: "SA"
+date: "1/4/2020"
+output: html_document
+---
+```{r}
+library(bigrquery)
+library(tidyverse)
+```
+
+```{r}
+project <- ""
+
+get_table(project = "bigquery-public-data",
+          dataset = "google_political_ads",
+          table = "campaign_targeting"
+ )
+```
+1. First, connect to the database and count how many rows it contains:
+
+```{r}
+query_exec("SELECT COUNT(*) FROM [bigquery-public-data:google_political_ads.campaign_targeting]",
+           project = project, useLegacySql = TRUE)
+```
+
+2. See the columns
+
+```{r}
+q <- query_exec(
+  "SELECT *
+  FROM [bigquery-public-data:google_political_ads.campaign_targeting]
+  LIMIT 10",
+	project = project, useLegacySql = FALSE)
+```
+3. How many political ads in India targeted men, women, third gender, or all?
+
+```{r}
+query_exec(
+  "SELECT count(campaign_id), gender_targeting
+  FROM [bigquery-public-data:google_political_ads.campaign_targeting]
+  WHERE geo_targeting_included LIKE 'India' OR geo_targeting_included LIKE '%INDIA%'
+  GROUP BY gender_targeting",
+	project = project, useLegacySql = FALSE)
+```
+3. Let's find out about political ad spending in India.
+```{r}
+project <- ""
+
+get_table(project = "bigquery-public-data",
+          dataset = "google_political_ads",
+          table = "geo_spend"
+ )
+```
+
+4. India's political advertising expenditure by state
+
+```{r}
+spend <- query_exec(
+  "SELECT country, country_subdivision_primary, spend_inr
+  FROM [bigquery-public-data:google_political_ads.geo_spend]
+  WHERE country = 'IN'",
+	project = project, useLegacySql = FALSE)
+
+```
+
+```{r}
+#install.packages("tmap")
+library(ggplot2)
+library(readxl)
+library(viridis)
+
+state_name <- read_xlsx("/Users/shreyaagarwal/Documents/Documents/Code/Machine Learning/ML_projects/states - shortnames.xlsx")
+spend <- spend %>% 
+  mutate(spend_share = round(spend_inr/sum(spend_inr)*100,1))
+
+names(spend)[2] <- "in-code"
+
+#Adding a new column that has a full name of each state, as the shortnames are in ISO 3166-2:IN format which is not commonly used. 
+spend <- left_join(spend, state_name, by = "in-code")
+
+
+#Plot to show the state wise share of poltitical advertising spending in India on Google ad services
+spend %>%
+  mutate(State = fct_reorder(State, spend_share)) %>%
+ggplot(aes(y = spend_share, x = State, fill = Zone)) + 
+  geom_bar(stat = "identity") + 
+  coord_flip() +
+  theme_minimal() + 
+  scale_fill_viridis(discrete = TRUE) + 
+  labs(y = "Political ad spend share (%)", title = "Political advertising spend across Google Ad services by state") + 
+  geom_text(aes(label=spend_share), size = 3, hjust= - 0.15) + 
+  theme(
+  # Remove panel border
+  panel.border = element_blank(),  
+  # Remove panel grid lines
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  # Remove panel background
+  panel.background = element_blank(),
+  # Add axis line
+  axis.line = element_line(colour = "grey"),
+  axis.title.x=element_blank(),
+  axis.text.x=element_blank(),
+  axis.ticks.x=element_blank(),
+  axis.line.x = element_blank()
+  )
+  
+
+```
+So, over 40% of political ad spending on google ads is being done in only three states - Andhra Pradesh, Tamil Nadu and Maharashtra. I could hook the reason to the size of the state, but Delhi is fourth in line, much smaller than Telangana and Uttar Pradesh, which are at the fifth and the sixth spot in spending.
+
+4. Who is spending the big bucks?
+
+```{r}
+
+#project <- ""
+
+#get_table(project = "bigquery-public-data",
+#          dataset = "google_political_ads",
+#          table = "advertiser_stats"
+# )
+```
+
+```{r}
+
+advert <- query_exec(
+  "SELECT advertiser_name, regions, elections, total_creatives, spend_inr
+  FROM [bigquery-public-data:google_political_ads.advertiser_stats]
+  WHERE regions = 'IN'",
+	project = project, useLegacySql = FALSE)
+
+```
+*Data shows that the ruling party, BJP, known for mobilizing social media during elections, spent Rs. 12.1 crores, 41% of the total money spent on political ads on Google. In comparison, Congress spent a fourth of that on atleast 425 ads that received atleast one impression. It's not possible to tell whether higher ad spend guarantees higher engagement or impressions as well as that data is not available, but would make for an interesting finding. Total_creatives column show the number of ads bought by the advertiser that recieved atleast one impression.* 
+```{r}
+
+summary(advert)
+
+advert %>% filter(spend_inr > 1000000) %>% arrange(desc(spend_inr))
+advert <- advert %>% mutate(share  = round(spend_inr/sum(spend_inr)*100,1))
+advert %>% arrange(desc(share))
+
+```
+5
+```{r}
+
+#project <- "election-data-264117"
+
+#get_table(project = "bigquery-public-data",
+#          dataset = "google_political_ads",
+#          table = "creative_stats"
+#)
+```
+
+```{r}
+
+pol_ad <- query_exec(
+  "SELECT ad_id, ad_type, regions, advertiser_name, date_range_start, date_range_end, num_of_days, impressions, spend_range_min_inr, spend_range_max_inr
+  FROM [bigquery-public-data:google_political_ads.creative_stats]
+  WHERE regions = 'IN'",
+	project = project, useLegacySql = FALSE)
+
+```
+```{r}
+
+dim(pol_ad) # how many rows in this dataset
+
+head(pol_ad)
+
+pol_ad <- na.omit(pol_ad) #Removing NAs
+
+summary(pol_ad) # A summary of columns - includes mean, median and interquartile range, max, min, first and third quartile
+
+table(pol_ad$impressions) # impressions column is a character, can be converted to factor, and then each factor could show the number of data points each has.
+
+```
+What kind of ads got most impressions? Which kind of ads are pricier? Does the price depend on duration of the ads as well?
+
+*94% of the political ads consisted of images, 5.7% were videos and the rest were text. In terms of engagements, nearly 70% image ads got less than 10K impressions. Video ads, though smaller in share, got way more impressions than the image and text based ads. For social media newbies, impressions are different from engagements in that the former only counts the number of times the content is displayed, while engagement is how many times people clicked on the ad. So image ads ran for 4 - 5 days on average and costed about Rs. 250, while video ads running for similar duration costed average of Rs. 94,328.51 which explains why more image ads are preferred over these ads.*
+```{r}
+
+library(reshape2)
+
+pol <- pol_ad %>% select(ad_type, impressions, ad_id)
+pol <- dcast(pol, ad_type ~ impressions)
+
+pol$sum <- rowSums(pol[,2:6],na.rm = FALSE) # Total of each ad type
+
+pol <- pol %>% mutate('> 10M' = round((`> 10M`/sum)*100,2))
+pol <- pol %>% mutate('≤ 10k' = round((`≤ 10k`/sum)*100,2))
+pol <- pol %>% mutate('100k-1M' = round((`100k-1M`/sum)*100,2))
+pol <- pol %>% mutate('10k-100k' = round((`10k-100k`/sum)*100,2))
+pol <- pol %>% mutate('1M-10M' = round((`1M-10M`/sum)*100,2))
+
+pol_s <- pol_ad %>% select(ad_type, num_of_days, spend_range_min_inr, spend_range_max_inr)
+
+pol_s %>% group_by(ad_type) %>% summarise(days = median(num_of_days), amount = median(spend_range_max_inr))
+summary(pol_s)
+
+```
+
+*The ad expenditure is a factor of two variables - duration of the ad, and its type. Both the variables are statistically significant. As the number of days for which the ad runs increases by a day, the maximum cost of ad could go up by Rs. 3104. In terms of ad type, video ads were Rs 75918 more expensive than the image ad (considered here as base level here).*
+```{r}
+
+#Linear regression model to find relationships between price of ads and duration of ads and whether it is a video, text or an image ad.
+linear_model <- lm(spend_range_max_inr ~ num_of_days + ad_type, data = pol_s)
+summary(linear_model)
+
+```
+
